@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prueba de escaneo</title>
+  <link rel="stylesheet" href="css/app.css">
+  <style>
+    .camara { position: relative; background: #000; border-radius: 12px; overflow: hidden; aspect-ratio: 4 / 3; }
+    .camara video { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .guia { position: absolute; left: 10%; right: 10%; top: 35%; bottom: 35%; border: 3px solid rgba(255,255,255,.85); border-radius: 8px; pointer-events: none; }
+    .flash { position: absolute; inset: 0; background: rgba(27,122,61,.45); opacity: 0; transition: opacity .25s; pointer-events: none; }
+    .flash.on { opacity: 1; transition: none; }
+    .ultimo { font-size: 1.5rem; font-weight: 700; margin: 8px 0 2px; word-break: break-all; }
+    table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+    th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--borde); vertical-align: top; }
+    .resumen { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; text-align: center; }
+    .resumen div { background: var(--fondo); border-radius: 8px; padding: 8px 4px; }
+    .resumen b { display: block; font-size: 1.3rem; }
+  </style>
+</head>
+<body>
+  <main class="contenedor">
+    <p><a href="index.html">← Inicio</a></p>
+    <h1>Prueba de escaneo</h1>
+
+    <div class="tarjeta">
+      <label for="motor">Lector</label>
+      <select id="motor">
+        <option value="auto">Automático (nativo si existe)</option>
+        <option value="zxing">Forzar ZXing (respaldo)</option>
+      </select>
+      <div class="fila" style="margin-top:12px">
+        <button id="iniciar" class="primario">Iniciar cámara</button>
+        <button id="detener" disabled>Detener</button>
+        <button id="linterna" class="oculto">Linterna</button>
+      </div>
+      <p id="estado" class="ayuda">Cámara apagada.</p>
+    </div>
+
+    <div class="camara">
+      <video id="video" playsinline muted></video>
+      <div class="guia"></div>
+      <div id="flash" class="flash"></div>
+    </div>
+
+    <div class="tarjeta" style="margin-top:12px">
+      <div id="ultimo" class="ultimo">—</div>
+      <div id="detalle" class="ayuda">Apunta a un código dentro del recuadro.</div>
+    </div>
+
+    <div class="tarjeta">
+      <div class="resumen">
+        <div><b id="r-total">0</b>lecturas</div>
+        <div><b id="r-media">—</b>promedio</div>
+        <div><b id="r-max">—</b>más lenta</div>
+      </div>
+      <p class="ayuda">El tiempo se mide desde que el escáner queda listo hasta que lee el código (incluye apuntar).</p>
+      <div class="fila">
+        <button id="copiar">Copiar resultados</button>
+        <button id="limpiar">Borrar lista</button>
+      </div>
+      <p id="copiado" class="estado ok"></p>
+      <table>
+        <thead><tr><th>Código</th><th>Qué es</th><th>Tiempo</th></tr></thead>
+        <tbody id="lista"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script src="vendor/zxing.min.js"></script>
+  <script src="js/escanear.js"></script>
+</body>
+</html>

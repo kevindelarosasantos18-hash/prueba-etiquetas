@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Generador de etiquetas</title>
+  <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/etiquetas.css">
+</head>
+<body>
+  <main class="contenedor no-imprimir">
+    <p><a href="index.html">← Inicio</a></p>
+    <h1>Generador de etiquetas</h1>
+    <p class="ayuda">Al imprimir: papel A4, márgenes "Ninguno" y escala <strong>100 %</strong> (no "Ajustar a la página"). Después mide con una regla la línea de 50 mm: si no mide 50 mm, la impresión está escalada.</p>
+
+    <div class="tarjeta">
+      <label for="modo">Tipo de hoja</label>
+      <select id="modo">
+        <option value="calibracion">Hoja de calibración (tamaños mínimos)</option>
+        <option value="productos">Etiquetas de productos</option>
+      </select>
+
+      <div id="panel-productos" class="oculto">
+        <label for="lista">Productos (uno por línea: nombre;precio;código opcional)</label>
+        <textarea id="lista">Lápiz HB;0.35
+Cuaderno 100 hojas cuadros;1.80
+Borrador blanco;0.25
+Esfero azul;0.40
+Producto con código de fábrica;2.50;7861234567898</textarea>
+        <p class="ayuda">Sin código, la app asigna uno interno de 8 dígitos que empieza con 20 (rango reservado para uso interno de tiendas). Con 13 dígitos válidos se imprime como EAN-13.</p>
+
+        <div class="fila">
+          <div style="flex:1;min-width:140px">
+            <label for="tamano">Tamaño</label>
+            <select id="tamano">
+              <option value="pequena">Pequeña 40 × 20 mm (70 por hoja)</option>
+              <option value="mediana" selected>Mediana 50 × 25 mm (44 por hoja)</option>
+              <option value="grande">Grande 63 × 38 mm (21 por hoja)</option>
+            </select>
+          </div>
+          <div style="flex:1;min-width:120px">
+            <label for="copias">Copias por producto</label>
+            <input id="copias" type="number" min="1" max="200" value="3">
+          </div>
+          <div style="flex:1;min-width:120px">
+            <label for="inicio">Empezar en la etiqueta n.º</label>
+            <input id="inicio" type="number" min="1" value="1">
+          </div>
+        </div>
+        <label><input id="ver-precio" type="checkbox" checked style="width:auto;min-height:auto"> Mostrar precio</label>
+        <label><input id="ver-corte" type="checkbox" checked style="width:auto;min-height:auto"> Mostrar líneas de corte</label>
+      </div>
+
+      <div class="fila" style="margin-top:12px">
+        <button id="generar" class="primario">Generar</button>
+        <button id="imprimir">Imprimir</button>
+      </div>
+      <p id="aviso" class="estado"></p>
+    </div>
+  </main>
+
+  <div id="vista" class="vista"></div>
+
+  <script src="vendor/JsBarcode.all.min.js"></script>
+  <script src="js/etiquetas.js"></script>
+</body>
+</html>

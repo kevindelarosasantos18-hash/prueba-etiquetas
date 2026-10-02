@@ -1,0 +1,50 @@
+.vista { overflow-x: auto; padding: 0 16px 32px; }
+
+.hoja {
+  position: relative;
+  width: 210mm;
+  height: 297mm;
+  margin: 0 auto 16px;
+  background: #fff;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, .15);
+  overflow: hidden;
+  color: #000;
+}
+
+.etiqueta {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1.2mm 1mm;
+  font-family: Arial, Helvetica, sans-serif;
+  text-align: center;
+  overflow: hidden;
+}
+.etiqueta.corte { outline: 0.2mm dashed #9aa0aa; outline-offset: -0.1mm; }
+.etiqueta .nombre { font-weight: 700; line-height: 1.1; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.etiqueta .codigo { line-height: 1; letter-spacing: .3mm; margin-top: .5mm; }
+.etiqueta .precio { font-weight: 700; line-height: 1.1; }
+.etiqueta svg { display: block; }
+
+.cal-titulo { position: absolute; left: 12mm; top: 8mm; font: 700 4.5mm Arial, sans-serif; }
+.cal-nota { position: absolute; left: 12mm; top: 14mm; width: 186mm; font: 3mm/1.35 Arial, sans-serif; }
+.cal-fila { position: absolute; left: 12mm; width: 186mm; display: flex; align-items: center; gap: 6mm; }
+.cal-rotulo { width: 34mm; font: 700 3.2mm/1.2 Arial, sans-serif; }
+.cal-rotulo small { display: block; font-weight: 400; }
+.cal-item { display: flex; flex-direction: column; align-items: center; font: 2.8mm Arial, sans-serif; }
+.regla { position: absolute; left: 12mm; bottom: 12mm; font: 3mm Arial, sans-serif; }
+.regla .linea { width: 50mm; height: 0; border-top: 0.4mm solid #000; position: relative; margin-top: 1.5mm; }
+.regla .linea::before, .regla .linea::after { content: ""; position: absolute; top: -2mm; height: 4mm; border-left: 0.4mm solid #000; }
+.regla .linea::before { left: 0; }
+.regla .linea::after { right: 0; }
+
+@media print {
+  @page { size: A4; margin: 0; }
+  html, body { background: #fff; margin: 0; }
+  .no-imprimir { display: none !important; }
+  .vista { padding: 0; overflow: visible; }
+  .hoja { margin: 0; box-shadow: none; page-break-after: always; break-after: page; }
+  .hoja:last-child { page-break-after: auto; break-after: auto; }
+}

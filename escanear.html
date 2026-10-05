@@ -46,6 +46,16 @@
         <button id="detener" disabled>Detener</button>
         <button id="linterna" class="oculto">Linterna</button>
       </div>
+      <div id="panel-enfoque" class="oculto">
+        <div class="fila" style="margin-top:8px">
+          <button id="enfocar">Enfocar ahora</button>
+          <label style="margin:0;font-weight:400"><input id="enfoque-manual" type="checkbox" style="width:auto;min-height:auto"> Enfoque manual</label>
+        </div>
+        <div id="panel-distancia" class="oculto">
+          <label for="distancia">Distancia de enfoque (mueve hasta que las barras se vean nítidas)</label>
+          <input id="distancia" type="range" style="min-height:auto">
+        </div>
+      </div>
       <div id="panel-brillo" class="oculto">
         <label for="brillo">Brillo de la cámara (bájalo si la imagen se ve blanca)</label>
         <input id="brillo" type="range" style="min-height:auto">

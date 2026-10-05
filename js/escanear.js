@@ -281,6 +281,22 @@
 
     var ajustes = pista.getSettings ? pista.getSettings() : {};
     var caps = pista.getCapabilities ? pista.getCapabilities() : {};
+    // Enfoque: algunos navegadores ignoran el enfoque continuo pedido al abrir la cámara;
+    // se vuelve a pedir ya con la cámara abierta y se ofrecen controles manuales.
+    var modosEnfoque = caps.focusMode || [];
+    if (modosEnfoque.indexOf('continuous') !== -1) {
+      pista.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
+    }
+    $('panel-enfoque').classList.toggle('oculto', !modosEnfoque.length);
+    $('enfoque-manual').checked = false;
+    $('enfoque-manual').disabled = !(caps.focusDistance && modosEnfoque.indexOf('manual') !== -1);
+    $('panel-distancia').classList.add('oculto');
+    if (caps.focusDistance) {
+      var fd = caps.focusDistance, d = $('distancia');
+      d.min = fd.min; d.max = fd.max; d.step = fd.step || (fd.max - fd.min) / 100;
+      d.value = ajustes.focusDistance !== undefined ? ajustes.focusDistance : (fd.min + fd.max) / 2;
+    }
+
     $('linterna').classList.toggle('oculto', !caps.torch);
     $('linterna').classList.remove('on');
     $('linterna').textContent = 'Linterna';
@@ -331,6 +347,7 @@
     $('detener').disabled = true;
     $('linterna').classList.add('oculto');
     $('panel-brillo').classList.add('oculto');
+    $('panel-enfoque').classList.add('oculto');
     estado('Cámara apagada.');
   }
 
@@ -369,17 +386,39 @@
     pista.applyConstraints({ advanced: [{ exposureMode: 'continuous', exposureCompensation: Number(this.value) }] }).catch(function () {});
   });
 
-  // Tocar la imagen fuerza un enfoque puntual y luego vuelve al enfoque continuo.
-  video.addEventListener('click', function () {
-    if (!pista || !pista.getCapabilities) return;
+  function enfocarAhora() {
+    if (!pista || !pista.getCapabilities || $('enfoque-manual').checked) return;
     var modos = pista.getCapabilities().focusMode || [];
     if (modos.indexOf('single-shot') === -1) return;
     pista.applyConstraints({ advanced: [{ focusMode: 'single-shot' }] }).then(function () {
       setTimeout(function () {
-        if (pista && modos.indexOf('continuous') !== -1) pista.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
+        if (pista && !$('enfoque-manual').checked && modos.indexOf('continuous') !== -1) {
+          pista.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
+        }
       }, 1500);
     }).catch(function () {});
+  }
+  $('enfocar').addEventListener('click', enfocarAhora);
+
+  $('enfoque-manual').addEventListener('change', function () {
+    if (!pista) return;
+    var manual = this.checked;
+    $('panel-distancia').classList.toggle('oculto', !manual);
+    var c = manual
+      ? { focusMode: 'manual', focusDistance: Number($('distancia').value) }
+      : { focusMode: 'continuous' };
+    pista.applyConstraints({ advanced: [c] }).catch(function () {
+      estado('Este navegador no permite cambiar el enfoque manualmente.', true);
+    });
   });
+
+  $('distancia').addEventListener('input', function () {
+    if (!pista || !$('enfoque-manual').checked) return;
+    pista.applyConstraints({ advanced: [{ focusMode: 'manual', focusDistance: Number(this.value) }] }).catch(function () {});
+  });
+
+  // Tocar la imagen fuerza un enfoque puntual y luego vuelve al enfoque continuo.
+  video.addEventListener('click', enfocarAhora);
 
   $('limpiar').addEventListener('click', function () {
     lecturas = [];
@@ -393,6 +432,7 @@
       'Navegador: ' + navigator.userAgent + '\n' +
       'Lector: ' + (motorActivo || 'sin iniciar') + ' · modo: ' + $('modo').value + '\n' +
       'Cámara: ' + (($('camara').selectedOptions[0] || {}).textContent || 'predeterminada') + '\n' +
+      'Enfoque: ' + (pista && pista.getSettings ? (pista.getSettings().focusMode || '?') + (pista.getSettings().focusDistance !== undefined ? ' · distancia ' + pista.getSettings().focusDistance : '') : '—') + '\n' +
       'Análisis por cuadro: ' + (Object.keys(costoPorLector).map(function (k) {
         var c = costoPorLector[k];
         return k + ' ' + (c.ms / c.cuadros).toFixed(0) + ' ms (' + c.cuadros + ' cuadros)';

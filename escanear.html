@@ -8,7 +8,7 @@
   <style>
     .camara { position: relative; background: #000; border-radius: 12px; overflow: hidden; aspect-ratio: 4 / 3; }
     .camara video { width: 100%; height: 100%; object-fit: cover; display: block; }
-    .guia { position: absolute; left: 10%; right: 10%; top: 35%; bottom: 35%; border: 3px solid rgba(255,255,255,.85); border-radius: 8px; pointer-events: none; }
+    .guia { position: absolute; left: 10%; right: 10%; top: 30%; bottom: 30%; border: 3px solid rgba(255,255,255,.85); border-radius: 8px; pointer-events: none; }
     .flash { position: absolute; inset: 0; background: rgba(27,122,61,.45); opacity: 0; transition: opacity .25s; pointer-events: none; }
     .flash.on { opacity: 1; transition: none; }
     .ultimo { font-size: 1.5rem; font-weight: 700; margin: 8px 0 2px; word-break: break-all; }
@@ -28,7 +28,13 @@
       <label for="motor">Lector</label>
       <select id="motor">
         <option value="auto">Automático (nativo si existe)</option>
-        <option value="zxing">Forzar ZXing (respaldo)</option>
+        <option value="wasm">ZXing-C++ (nuevo, más robusto)</option>
+        <option value="zxing">ZXing JS (el que ya probaste)</option>
+      </select>
+      <label for="modo">Modo</label>
+      <select id="modo">
+        <option value="continua">Continua (como en caja: no repite el mismo código hasta que sale del recuadro)</option>
+        <option value="una">Una a la vez (lee un código y espera a que toques "Leer siguiente")</option>
       </select>
       <div class="fila" style="margin-top:12px">
         <button id="iniciar" class="primario">Iniciar cámara</button>
@@ -44,6 +50,8 @@
       <div id="flash" class="flash"></div>
     </div>
 
+    <button id="siguiente" class="primario bloque oculto" style="margin-top:12px">Leer siguiente</button>
+
     <div class="tarjeta" style="margin-top:12px">
       <div id="ultimo" class="ultimo">—</div>
       <div id="detalle" class="ayuda">Apunta a un código dentro del recuadro.</div>
@@ -53,9 +61,9 @@
       <div class="resumen">
         <div><b id="r-total">0</b>lecturas</div>
         <div><b id="r-media">—</b>promedio</div>
-        <div><b id="r-max">—</b>más lenta</div>
+        <div><b id="r-malas">0</b>sospechosas</div>
       </div>
-      <p class="ayuda">El tiempo se mide desde que el escáner queda listo hasta que lee el código (incluye apuntar).</p>
+      <p class="ayuda">El tiempo se mide desde la lectura anterior (o desde que tocas "Leer siguiente") hasta que lee el código; incluye apuntar. Solo se leen códigos dentro del recuadro blanco; si hay varios, el más cercano al centro. "Sospechosas" son códigos que no existen en las hojas de prueba.</p>
       <div class="fila">
         <button id="copiar">Copiar resultados</button>
         <button id="limpiar">Borrar lista</button>
@@ -69,6 +77,7 @@
   </main>
 
   <script src="vendor/zxing.min.js"></script>
+  <script src="vendor/zxing-wasm-reader.js"></script>
   <script src="js/escanear.js"></script>
 </body>
 </html>

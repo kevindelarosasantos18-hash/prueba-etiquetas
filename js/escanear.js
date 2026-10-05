@@ -1,31 +1,46 @@
 (function () {
   'use strict';
 
-  var PAUSA_TRAS_LECTURA_MS = 1000;   // tiempo para pasar al siguiente código
-  var INTERVALO_DETECCION_MS = 100;   // limita el uso de CPU en teléfonos de gama baja
+  // ---- Ajustes de lectura ----
+  var INTERVALO_DETECCION_MS = 100;  // limita el uso de CPU en teléfonos de gama baja
+  var CONFIRMAR_VENTANA_MS = 450;    // el mismo código debe verse en 2 cuadros seguidos dentro de esta ventana
+  var AUSENCIA_PARA_REPETIR_MS = 800; // el mismo código solo se vuelve a contar si salió del recuadro este tiempo
+  var PAUSA_ENTRE_CODIGOS_MS = 300;  // pausa mínima antes de aceptar un código distinto
+  // Recuadro blanco en pantalla, en fracciones del área visible (debe coincidir con .guia en el CSS).
+  var GUIA = { x0: 0.10, x1: 0.90, y0: 0.30, y1: 0.70 };
   var FORMATOS_NATIVOS = ['code_128', 'ean_13', 'ean_8', 'upc_a'];
 
   var $ = function (id) { return document.getElementById(id); };
   var video = $('video');
 
-  var flujo = null;          // MediaStream
-  var pista = null;          // MediaStreamTrack de video
-  var lectorZxing = null;
-  var detectorNativo = null;
-  var motorActivo = '';
-  var activo = false;
-  var listoDesde = 0;        // momento en que el escáner quedó listo
-  var pausadoHasta = 0;
-  var linternaOn = false;
-  var lecturas = [];
-  var temporizador = null;
-  var audio = null;
-  var cuadros = 0;           // cuadros analizados
-  var msAnalisis = 0;        // tiempo total de análisis, para medir la carga en el teléfono
+  var flujo = null, pista = null;
+  var lectorZxing = null, detectorNativo = null, lienzo = null, ctx = null;
+  var motorActivo = '', activo = false, temporizador = null, audio = null, linternaOn = false;
+  var lecturas = [], cuadros = 0, msAnalisis = 0;
+
+  // Estado de la lógica de aceptación
+  var pendiente = null;        // { texto, formato, t } visto una vez, esperando confirmación
+  var ultimoAceptado = '';     // último código contado
+  var tAceptado = 0;           // cuándo se contó
+  var ultimoVistoEnZona = 0;   // última vez que ese mismo código seguía en el recuadro
+  var listoDesde = 0;          // inicio del cronómetro de la lectura actual
+  var esperandoToque = false;  // modo "una a la vez": pausa hasta tocar "Leer siguiente"
 
   function estado(texto, error) {
     $('estado').textContent = texto;
     $('estado').className = error ? 'estado error' : 'ayuda';
+  }
+
+  function eanValido(c) {
+    if (!/^\d{13}$/.test(c)) return false;
+    var s = 0;
+    for (var i = 0; i < 12; i++) s += Number(c[i]) * (i % 2 === 0 ? 1 : 3);
+    return (10 - (s % 10)) % 10 === Number(c[12]);
+  }
+
+  // Códigos que existen en las hojas de prueba. Cualquier otro es sospechoso de lectura errónea.
+  function esperado(c) {
+    return /^90(20|25|30|35|40|50)000[1-3]$/.test(c) || /^20\d{6}$/.test(c) || eanValido(c);
   }
 
   function describir(codigo, formato) {
@@ -39,10 +54,8 @@
   function pitido() {
     try {
       audio = audio || new (window.AudioContext || window.webkitAudioContext)();
-      var o = audio.createOscillator();
-      var g = audio.createGain();
-      o.frequency.value = 1800;
-      g.gain.value = 0.15;
+      var o = audio.createOscillator(), g = audio.createGain();
+      o.frequency.value = 1800; g.gain.value = 0.15;
       o.connect(g); g.connect(audio.destination);
       o.start(); o.stop(audio.currentTime + 0.08);
     } catch (e) { /* sin sonido */ }
@@ -52,15 +65,65 @@
     setTimeout(function () { f.classList.remove('on'); }, 120);
   }
 
-  function registrar(codigo, formato) {
-    var ahora = performance.now();
-    if (ahora < pausadoHasta) return;
-    var ms = Math.round(ahora - listoDesde);
-    pausadoHasta = ahora + PAUSA_TRAS_LECTURA_MS;
-    listoDesde = pausadoHasta;
+  function modoUnaAUna() { return $('modo').value === 'una'; }
 
-    var desc = describir(codigo, formato);
-    lecturas.push({ codigo: codigo, desc: desc, ms: ms, motor: motorActivo, hora: new Date().toLocaleTimeString() });
+  // Convierte el recuadro de pantalla a coordenadas del video (0–1), considerando el recorte
+  // de object-fit: cover. Funciona con el teléfono vertical u horizontal.
+  function zonaVideo() {
+    var vw = video.videoWidth, vh = video.videoHeight;
+    var cw = video.clientWidth || vw, ch = video.clientHeight || vh;
+    var escala = Math.max(cw / vw, ch / vh);
+    var visW = cw / escala / vw, visH = ch / escala / vh;   // fracción visible del video
+    var offX = (1 - visW) / 2, offY = (1 - visH) / 2;
+    return {
+      x0: offX + GUIA.x0 * visW, x1: offX + GUIA.x1 * visW,
+      y0: offY + GUIA.y0 * visH, y1: offY + GUIA.y1 * visH
+    };
+  }
+
+  // ---- Decide si un cuadro produce una lectura válida ----
+  // candidatos: [{ texto, formato, cx, cy }] con el centro en coordenadas 0–1 del video.
+  function procesar(candidatos) {
+    var ahora = performance.now();
+    var z = zonaVideo();
+    var enZona = candidatos.filter(function (c) {
+      return c.cx >= z.x0 && c.cx <= z.x1 && c.cy >= z.y0 && c.cy <= z.y1;
+    });
+
+    // El código ya contado sigue en el recuadro: no se repite.
+    if (ultimoAceptado && enZona.some(function (c) { return c.texto === ultimoAceptado; })) {
+      ultimoVistoEnZona = ahora;
+    }
+    if (!enZona.length) { pendiente = null; return; }
+
+    // Con varios códigos en el recuadro, se elige el más cercano al centro.
+    enZona.sort(function (a, b) {
+      return (Math.pow(a.cx - 0.5, 2) + Math.pow(a.cy - 0.5, 2)) - (Math.pow(b.cx - 0.5, 2) + Math.pow(b.cy - 0.5, 2));
+    });
+    var c = enZona[0];
+
+    if (c.texto === ultimoAceptado && ahora - ultimoVistoEnZona < AUSENCIA_PARA_REPETIR_MS) return;
+    if (ahora - tAceptado < PAUSA_ENTRE_CODIGOS_MS) return;
+
+    // Confirmación: dos cuadros seguidos con el mismo código.
+    if (!pendiente || pendiente.texto !== c.texto || ahora - pendiente.t > CONFIRMAR_VENTANA_MS) {
+      pendiente = { texto: c.texto, formato: c.formato, t: ahora };
+      return;
+    }
+    pendiente = null;
+    aceptar(c.texto, c.formato, ahora);
+  }
+
+  function aceptar(codigo, formato, ahora) {
+    var ms = Math.round(ahora - listoDesde);
+    ultimoAceptado = codigo;
+    tAceptado = ahora;
+    ultimoVistoEnZona = ahora;
+    listoDesde = ahora;
+
+    var ok = esperado(codigo);
+    var desc = describir(codigo, formato) + (ok ? '' : ' ⚠ código inesperado: posible lectura errónea');
+    lecturas.push({ codigo: codigo, desc: desc, ms: ms, ok: ok, motor: motorActivo, modo: $('modo').value, hora: new Date().toLocaleTimeString() });
     pitido();
 
     $('ultimo').textContent = codigo;
@@ -74,18 +137,28 @@
     });
     $('lista').insertBefore(tr, $('lista').firstChild);
     actualizarResumen();
+
+    if (modoUnaAUna()) {
+      esperandoToque = true;
+      $('siguiente').classList.remove('oculto');
+    }
   }
 
   function actualizarResumen() {
     $('r-total').textContent = lecturas.length;
-    if (!lecturas.length) { $('r-media').textContent = '—'; $('r-max').textContent = '—'; return; }
-    var suma = 0, max = 0;
-    lecturas.forEach(function (l) { suma += l.ms; if (l.ms > max) max = l.ms; });
+    var malas = lecturas.filter(function (l) { return !l.ok; }).length;
+    $('r-malas').textContent = malas;
+    if (!lecturas.length) { $('r-media').textContent = '—'; return; }
+    var suma = 0;
+    lecturas.forEach(function (l) { suma += l.ms; });
     $('r-media').textContent = (suma / lecturas.length / 1000).toFixed(1) + ' s';
-    $('r-max').textContent = (max / 1000).toFixed(1) + ' s';
   }
 
-  // ---------- Motor nativo (BarcodeDetector) ----------
+  function puedeAnalizar() {
+    return activo && !esperandoToque && video.readyState >= 2 && video.videoWidth;
+  }
+
+  // ---- Motor nativo (BarcodeDetector) ----
   async function nativoDisponible() {
     if (!('BarcodeDetector' in window)) return false;
     try {
@@ -96,22 +169,68 @@
 
   async function cicloNativo() {
     if (!activo || motorActivo !== 'nativo') return;
-    if (performance.now() >= pausadoHasta && video.readyState >= 2) {
+    if (puedeAnalizar()) {
       var t0 = performance.now();
       try {
         var res = await detectorNativo.detect(video);
-        if (res.length) registrar(res[0].rawValue, res[0].format);
+        var vw = video.videoWidth, vh = video.videoHeight;
+        procesar(res.map(function (r) {
+          var b = r.boundingBox;
+          return { texto: r.rawValue, formato: r.format, cx: (b.x + b.width / 2) / vw, cy: (b.y + b.height / 2) / vh };
+        }));
       } catch (e) { /* cuadro no disponible; se reintenta */ }
       cuadros++; msAnalisis += performance.now() - t0;
     }
     temporizador = setTimeout(cicloNativo, INTERVALO_DETECCION_MS);
   }
 
-  // ---------- Motor ZXing ----------
-  // Se decodifica una franja central del cuadro (60 % del alto) para ahorrar CPU.
-  var lienzo = null;
-  var ctx = null;
+  function aGris(img) {
+    var d = img.data, n = img.width * img.height, g = new Uint8ClampedArray(n);
+    for (var i = 0, j = 0; i < n; i++, j += 4) g[i] = (d[j] * 77 + d[j + 1] * 150 + d[j + 2] * 29) >> 8;
+    return g;
+  }
 
+  // ---- Motor ZXing-C++ (WebAssembly): más robusto, lee varios códigos y su posición ----
+  var wasmListo = null;
+  function iniciarWasm() {
+    if (!wasmListo) {
+      wasmListo = ZXingWASM.prepareZXingModule({
+        overrides: { locateFile: function (ruta, prefijo) { return ruta.endsWith('.wasm') ? new URL('vendor/' + ruta, location.href).href : prefijo + ruta; } },
+        fireImmediately: true
+      });
+    }
+    lienzo = document.createElement('canvas');
+    ctx = lienzo.getContext('2d', { willReadFrequently: true });
+    estado('Cargando lector ZXing-C++…');
+    return wasmListo.then(function () { cicloWasm(); });
+  }
+
+  var OPCIONES_WASM = { formats: ['Code128', 'EAN13', 'EAN8', 'UPCA'], tryHarder: true, maxNumberOfSymbols: 4 };
+
+  async function cicloWasm() {
+    if (!activo || motorActivo !== 'wasm') return;
+    if (puedeAnalizar()) {
+      var vw = video.videoWidth, vh = video.videoHeight, z = zonaVideo();
+      var x = Math.round(vw * z.x0), y = Math.round(vh * z.y0);
+      var w = Math.round(vw * (z.x1 - z.x0)), h = Math.round(vh * (z.y1 - z.y0));
+      if (lienzo.width !== w || lienzo.height !== h) { lienzo.width = w; lienzo.height = h; }
+      var t0 = performance.now();
+      ctx.drawImage(video, x, y, w, h, 0, 0, w, h);
+      try {
+        var res = await ZXingWASM.readBarcodes(ctx.getImageData(0, 0, w, h), OPCIONES_WASM);
+        procesar(res.filter(function (r) { return r.isValid; }).map(function (r) {
+          var p = r.position;
+          var px = (p.topLeft.x + p.topRight.x + p.bottomLeft.x + p.bottomRight.x) / 4;
+          var py = (p.topLeft.y + p.topRight.y + p.bottomLeft.y + p.bottomRight.y) / 4;
+          return { texto: r.text, formato: r.format, cx: (x + px) / vw, cy: (y + py) / vh };
+        }));
+      } catch (e) { /* cuadro no disponible; se reintenta */ }
+      cuadros++; msAnalisis += performance.now() - t0;
+    }
+    temporizador = setTimeout(cicloWasm, INTERVALO_DETECCION_MS);
+  }
+
+  // ---- Motor ZXing: solo analiza la zona del recuadro (menos CPU, sin códigos vecinos) ----
   function iniciarZxing() {
     var hints = new Map();
     hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
@@ -128,29 +247,36 @@
 
   function cicloZxing() {
     if (!activo || motorActivo !== 'zxing') return;
-    if (performance.now() >= pausadoHasta && video.readyState >= 2 && video.videoWidth) {
-      var w = video.videoWidth;
-      var h = Math.round(video.videoHeight * 0.6);
-      var y = Math.round((video.videoHeight - h) / 2);
+    if (puedeAnalizar()) {
+      var vw = video.videoWidth, vh = video.videoHeight, z = zonaVideo();
+      var x = Math.round(vw * z.x0), y = Math.round(vh * z.y0);
+      var w = Math.round(vw * (z.x1 - z.x0)), h = Math.round(vh * (z.y1 - z.y0));
       if (lienzo.width !== w || lienzo.height !== h) { lienzo.width = w; lienzo.height = h; }
       var t0 = performance.now();
-      ctx.drawImage(video, 0, y, w, h, 0, 0, w, h);
-      try {
-        var fuente = new ZXing.HTMLCanvasElementLuminanceSource(lienzo);
-        var mapa = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(fuente));
-        var r = lectorZxing.decodeWithState(mapa);
-        registrar(r.getText(), ZXing.BarcodeFormat[r.getBarcodeFormat()]);
-      } catch (e) {
-        /* ningún código en este cuadro */
-      } finally {
-        lectorZxing.reset();
-        cuadros++; msAnalisis += performance.now() - t0;
+      ctx.drawImage(video, x, y, w, h, 0, 0, w, h);
+      var candidatos = [];
+      // ZXing JS se confunde si un código vecino o una línea de corte aparece en el borde:
+      // se prueban franjas centrales de 50 % y 70 % del recuadro y, si no hay lectura, el recuadro completo.
+      var intentos = [[Math.round(w * 0.25), Math.round(w * 0.5)], [Math.round(w * 0.15), Math.round(w * 0.7)], [0, w]];
+      for (var i = 0; i < intentos.length && !candidatos.length; i++) {
+        try {
+          var img = ctx.getImageData(intentos[i][0], 0, intentos[i][1], h);
+          var lum = new ZXing.RGBLuminanceSource(aGris(img), img.width, img.height);
+          var r = lectorZxing.decodeWithState(new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum)));
+          candidatos.push({ texto: r.getText(), formato: ZXing.BarcodeFormat[r.getBarcodeFormat()], cx: (z.x0 + z.x1) / 2, cy: (z.y0 + z.y1) / 2 });
+        } catch (e) {
+          /* ningún código en este intento */
+        } finally {
+          lectorZxing.reset();
+        }
       }
+      cuadros++; msAnalisis += performance.now() - t0;
+      procesar(candidatos);
     }
     temporizador = setTimeout(cicloZxing, INTERVALO_DETECCION_MS);
   }
 
-  // ---------- Cámara ----------
+  // ---- Cámara ----
   async function iniciar() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       estado('Este navegador no permite usar la cámara. Abre la página con https:// en Chrome.', true);
@@ -176,16 +302,23 @@
     video.srcObject = flujo;
     await video.play().catch(function () {});
 
-    var quiereNativo = $('motor').value === 'auto' && await nativoDisponible();
-    motorActivo = quiereNativo ? 'nativo' : 'zxing';
+    var eleccion = $('motor').value;
+    if (eleccion === 'auto') motorActivo = (await nativoDisponible()) ? 'nativo' : 'wasm';
+    else motorActivo = eleccion;
     activo = true;
     cuadros = 0; msAnalisis = 0;
+    pendiente = null; ultimoAceptado = ''; tAceptado = 0; esperandoToque = false;
     listoDesde = performance.now();
-    pausadoHasta = 0;
+    $('siguiente').classList.add('oculto');
 
     if (motorActivo === 'nativo') {
       detectorNativo = new window.BarcodeDetector({ formats: FORMATOS_NATIVOS });
       cicloNativo();
+    } else if (motorActivo === 'wasm') {
+      try { await iniciarWasm(); } catch (e) {
+        estado('No se pudo cargar el lector ZXing-C++: ' + e.message, true);
+        return;
+      }
     } else {
       iniciarZxing();
     }
@@ -194,7 +327,7 @@
     var caps = pista.getCapabilities ? pista.getCapabilities() : {};
     $('linterna').classList.toggle('oculto', !caps.torch);
     $('detener').disabled = false;
-    estado('Lector: ' + (motorActivo === 'nativo' ? 'nativo del navegador' : 'ZXing') +
+    estado('Lector: ' + ({ nativo: 'nativo del navegador', wasm: 'ZXing-C++', zxing: 'ZXing JS' })[motorActivo] +
       ' · cámara ' + (ajustes.width || '?') + '×' + (ajustes.height || '?') +
       (caps.focusMode ? ' · enfoque: ' + caps.focusMode.join('/') : ''));
   }
@@ -207,6 +340,8 @@
     pista = null;
     linternaOn = false;
     video.srcObject = null;
+    esperandoToque = false;
+    $('siguiente').classList.add('oculto');
     $('iniciar').disabled = false;
     $('detener').disabled = true;
     $('linterna').classList.add('oculto');
@@ -216,6 +351,19 @@
   $('iniciar').addEventListener('click', iniciar);
   $('detener').addEventListener('click', detener);
   $('motor').addEventListener('change', function () { if (activo) { detener(); iniciar(); } });
+  $('modo').addEventListener('change', function () {
+    esperandoToque = false;
+    $('siguiente').classList.add('oculto');
+    listoDesde = performance.now();
+  });
+
+  $('siguiente').addEventListener('click', function () {
+    esperandoToque = false;
+    ultimoAceptado = '';           // en este modo se puede volver a leer el mismo código a propósito
+    pendiente = null;
+    listoDesde = performance.now();
+    $('siguiente').classList.add('oculto');
+  });
 
   $('linterna').addEventListener('click', function () {
     if (!pista) return;
@@ -235,10 +383,10 @@
   $('copiar').addEventListener('click', function () {
     var texto = 'Prueba de escaneo · ' + new Date().toLocaleString() + '\n' +
       'Navegador: ' + navigator.userAgent + '\n' +
-      'Lector: ' + (motorActivo || 'sin iniciar') + '\n' +
+      'Lector: ' + (motorActivo || 'sin iniciar') + ' · modo: ' + $('modo').value + '\n' +
       'Análisis por cuadro: ' + (cuadros ? (msAnalisis / cuadros).toFixed(0) + ' ms (' + cuadros + ' cuadros)' : '—') + '\n' +
-      'Lecturas: ' + lecturas.length + ' · promedio ' + $('r-media').textContent + ' · más lenta ' + $('r-max').textContent + '\n\n' +
-      lecturas.map(function (l) { return l.hora + '\t' + l.codigo + '\t' + l.desc + '\t' + l.ms + ' ms\t' + l.motor; }).join('\n');
+      'Lecturas: ' + lecturas.length + ' · sospechosas: ' + $('r-malas').textContent + ' · promedio ' + $('r-media').textContent + '\n\n' +
+      lecturas.map(function (l) { return l.hora + '\t' + l.codigo + '\t' + l.desc + '\t' + l.ms + ' ms\t' + l.motor + '\t' + l.modo; }).join('\n');
     var listo = function () { $('copiado').textContent = 'Copiado. Pégalo en el chat.'; };
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(texto).then(listo, function () { prompt('Copia este texto:', texto); });

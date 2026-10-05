@@ -7,8 +7,8 @@ Prototipo sin servidor ni base de datos. Responde una sola pregunta antes de con
 | Archivo | Qué hace |
 |---|---|
 | `etiquetas.html` | Genera hojas A4: una **hoja de calibración** (6 grosores de barra, de 0,20 a 0,50 mm) y **etiquetas de productos** en 3 tamaños, con líneas de corte, precio opcional y posición de inicio para aprovechar hojas usadas |
-| `escanear.html` | Escanea con la cámara del celular. Usa el lector nativo del navegador si existe y, si no, ZXing. Mide el tiempo de cada lectura y el costo de análisis por cuadro, y copia los resultados para pegarlos en el chat |
-| `vendor/` | JsBarcode 3.12.3 y @zxing/library 0.21.3, copiados localmente (sin depender de internet ni de CDN) |
+| `escanear.html` | Escanea con la cámara del celular con tres lectores a elegir: nativo del navegador, ZXing-C++ (WebAssembly) y ZXing JS. Solo lee dentro del recuadro blanco y, si hay varios códigos, toma el más cercano al centro. Pide dos cuadros seguidos iguales antes de contar una lectura. Modo **continuo** (no repite un código hasta que sale del recuadro) y modo **una a la vez** (espera a que toques "Leer siguiente"). Mide tiempos, marca lecturas sospechosas y copia los resultados |
+| `vendor/` | JsBarcode 3.12.3, @zxing/library 0.21.3 y zxing-wasm 3.1.4 (lector), copiados localmente (sin depender de CDN) |
 
 Códigos internos: 8 dígitos que empiezan con `20` (rango reservado para uso interno de tiendas). Códigos de 13 dígitos válidos se imprimen como EAN-13.
 
@@ -35,9 +35,10 @@ Códigos internos: 8 dígitos que empiezan con `20` (rango reservado para uso in
 2. Con el lector *Automático*, escanear cada fila de la hoja de calibración (3 copias por fila), sosteniendo el celular a unos 10–15 cm.
 3. Repetir con la hoja en papel fotográfico.
 4. Repetir con luz baja (o activar la linterna si aparece el botón).
-5. Cambiar el lector a *Forzar ZXing* y repetir la hoja mate.
-6. Escanear las etiquetas de productos de los 3 tamaños.
-7. **Copiar resultados** después de cada bloque y pegarlos en el chat, indicando papel y luz.
+5. Repetir la hoja mate con cada lector: *ZXing-C++* y *ZXing JS*.
+6. Probar los dos modos: *Continua* (dejar el celular quieto sobre un código: debe contarlo una sola vez) y *Una a la vez*.
+7. Escanear las etiquetas de productos de los 3 tamaños.
+8. **Copiar resultados** después de cada bloque y pegarlos en el chat, indicando papel y luz.
 
 **Anotar a mano:** la fila más fina que se lee en menos de 2 segundos en cada papel, y cualquier código que se haya leído mal (otro número).
 
@@ -52,4 +53,5 @@ Códigos internos: 8 dígitos que empiezan con `20` (rango reservado para uso in
 - Sintaxis de los scripts revisada con `node --check`.
 - Hojas generadas en Chromium e impresas a PDF A4: los 18 códigos de calibración y las 45 etiquetas de producto (3 tamaños) se decodificaron correctamente con zxing-cpp a 300 ppp.
 - Escáner probado en Chromium con una cámara simulada: ZXing leyó la etiqueta mediana en ~60–90 ms por lectura, sin errores de consola.
+- Versión 2 (5 oct 2026), con cámara simulada sobre una fila de 3 códigos de calibración: ZXing-C++ y ZXing JS leen solo el código central, una sola vez en modo continuo (antes se repetía cada segundo), y una vez por toque en modo "una a la vez". Sobre una etiqueta mediana con vecinas y líneas de corte, ambos leen el código correcto.
 - No probado aún: cámara real, impresora real, lector nativo (no existe en Chromium de Linux).

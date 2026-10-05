@@ -281,6 +281,17 @@
     var ajustes = pista.getSettings ? pista.getSettings() : {};
     var caps = pista.getCapabilities ? pista.getCapabilities() : {};
     $('linterna').classList.toggle('oculto', !caps.torch);
+    $('linterna').classList.remove('on');
+    $('linterna').textContent = 'Linterna';
+    // Compensación de exposición: permite oscurecer la imagen cuando el papel refleja mucha luz.
+    if (caps.exposureCompensation && caps.exposureCompensation.max > caps.exposureCompensation.min) {
+      var b = $('brillo'), ec = caps.exposureCompensation;
+      b.min = ec.min; b.max = ec.max; b.step = ec.step || 0.1;
+      b.value = ajustes.exposureCompensation !== undefined ? ajustes.exposureCompensation : 0;
+      $('panel-brillo').classList.remove('oculto');
+    } else {
+      $('panel-brillo').classList.add('oculto');
+    }
     $('detener').disabled = false;
     estado('Lector: ' + ({ nativo: 'nativo del navegador', wasm: 'ZXing-C++' })[motorActivo] +
       ' · cámara ' + (ajustes.width || '?') + '×' + (ajustes.height || '?') +
@@ -299,6 +310,7 @@
     $('iniciar').disabled = false;
     $('detener').disabled = true;
     $('linterna').classList.add('oculto');
+    $('panel-brillo').classList.add('oculto');
     estado('Cámara apagada.');
   }
 
@@ -322,9 +334,30 @@
   $('linterna').addEventListener('click', function () {
     if (!pista) return;
     linternaOn = !linternaOn;
-    pista.applyConstraints({ advanced: [{ torch: linternaOn }] }).catch(function () {
+    pista.applyConstraints({ advanced: [{ torch: linternaOn }] }).then(function () {
+      $('linterna').classList.toggle('on', linternaOn);
+      $('linterna').textContent = linternaOn ? 'Linterna: encendida' : 'Linterna';
+    }).catch(function () {
+      linternaOn = false;
       estado('La linterna no está disponible en este teléfono.', true);
     });
+  });
+
+  $('brillo').addEventListener('input', function () {
+    if (!pista) return;
+    pista.applyConstraints({ advanced: [{ exposureMode: 'continuous', exposureCompensation: Number(this.value) }] }).catch(function () {});
+  });
+
+  // Tocar la imagen fuerza un enfoque puntual y luego vuelve al enfoque continuo.
+  video.addEventListener('click', function () {
+    if (!pista || !pista.getCapabilities) return;
+    var modos = pista.getCapabilities().focusMode || [];
+    if (modos.indexOf('single-shot') === -1) return;
+    pista.applyConstraints({ advanced: [{ focusMode: 'single-shot' }] }).then(function () {
+      setTimeout(function () {
+        if (pista && modos.indexOf('continuous') !== -1) pista.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
+      }, 1500);
+    }).catch(function () {});
   });
 
   $('limpiar').addEventListener('click', function () {

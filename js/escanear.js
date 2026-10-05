@@ -242,20 +242,21 @@
     $('iniciar').disabled = true;
     estado('Pidiendo permiso de cámara…');
     try {
-      flujo = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1280 }, height: { ideal: 720 },
-          advanced: [{ focusMode: 'continuous' }]
-        }
-      });
+      var elegida = $('camara').value;
+      var video_ = {
+        width: { ideal: 1280 }, height: { ideal: 720 },
+        advanced: [{ focusMode: 'continuous' }]
+      };
+      if (elegida) video_.deviceId = { exact: elegida };
+      else video_.facingMode = { ideal: 'environment' };
+      flujo = await navigator.mediaDevices.getUserMedia({ audio: false, video: video_ });
     } catch (e) {
       $('iniciar').disabled = false;
       estado('No se pudo abrir la cámara: ' + (e.name === 'NotAllowedError' ? 'permiso denegado.' : e.message), true);
       return;
     }
     pista = flujo.getVideoTracks()[0];
+    await llenarCamaras(pista);
     video.srcObject = flujo;
     await video.play().catch(function () {});
 
@@ -298,6 +299,25 @@
       (caps.focusMode ? ' · enfoque: ' + caps.focusMode.join('/') : ''));
   }
 
+  // Lista las cámaras disponibles. Algunos celulares tienen varias traseras (principal,
+  // gran angular, macro, profundidad) y el navegador puede elegir una que enfoca mal.
+  async function llenarCamaras(pistaActual) {
+    try {
+      var disp = (await navigator.mediaDevices.enumerateDevices()).filter(function (d) { return d.kind === 'videoinput'; });
+      var sel = $('camara');
+      var actual = pistaActual.getSettings ? pistaActual.getSettings().deviceId : '';
+      sel.innerHTML = '';
+      disp.forEach(function (d, i) {
+        var o = document.createElement('option');
+        o.value = d.deviceId;
+        o.textContent = d.label || ('Cámara ' + (i + 1));
+        if (d.deviceId === actual) o.selected = true;
+        sel.appendChild(o);
+      });
+      $('panel-camara').classList.toggle('oculto', disp.length < 2);
+    } catch (e) { /* sin lista de cámaras */ }
+  }
+
   function detener() {
     activo = false;
     clearTimeout(temporizador);
@@ -317,6 +337,7 @@
   $('iniciar').addEventListener('click', iniciar);
   $('detener').addEventListener('click', detener);
   $('motor').addEventListener('change', function () { if (activo) { detener(); iniciar(); } });
+  $('camara').addEventListener('change', function () { if (activo) { detener(); iniciar(); } });
   $('modo').addEventListener('change', function () {
     esperandoToque = false;
     $('siguiente').classList.add('oculto');
@@ -371,6 +392,7 @@
     var texto = 'Prueba de escaneo · ' + new Date().toLocaleString() + '\n' +
       'Navegador: ' + navigator.userAgent + '\n' +
       'Lector: ' + (motorActivo || 'sin iniciar') + ' · modo: ' + $('modo').value + '\n' +
+      'Cámara: ' + (($('camara').selectedOptions[0] || {}).textContent || 'predeterminada') + '\n' +
       'Análisis por cuadro: ' + (Object.keys(costoPorLector).map(function (k) {
         var c = costoPorLector[k];
         return k + ' ' + (c.ms / c.cuadros).toFixed(0) + ' ms (' + c.cuadros + ' cuadros)';

@@ -28,8 +28,7 @@
       <label for="motor">Lector</label>
       <select id="motor">
         <option value="auto">Automático (nativo si existe)</option>
-        <option value="wasm">ZXing-C++ (nuevo, más robusto)</option>
-        <option value="zxing">ZXing JS (el que ya probaste)</option>
+        <option value="wasm">ZXing-C++ (respaldo)</option>
       </select>
       <label for="modo">Modo</label>
       <select id="modo">
@@ -76,7 +75,6 @@
     </div>
   </main>
 
-  <script src="vendor/zxing.min.js"></script>
   <script src="vendor/zxing-wasm-reader.js"></script>
   <script src="js/escanear.js"></script>
 </body>

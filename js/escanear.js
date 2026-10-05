@@ -14,9 +14,10 @@
   var video = $('video');
 
   var flujo = null, pista = null;
-  var lectorZxing = null, detectorNativo = null, lienzo = null, ctx = null;
+  var detectorNativo = null, lienzo = null, ctx = null;
   var motorActivo = '', activo = false, temporizador = null, audio = null, linternaOn = false;
   var lecturas = [], cuadros = 0, msAnalisis = 0;
+  var costoPorLector = {};   // { lector: { cuadros, ms } } acumulado en toda la sesión
 
   // Estado de la lógica de aceptación
   var pendiente = null;        // { texto, formato, t } visto una vez, esperando confirmación
@@ -38,16 +39,18 @@
     return (10 - (s % 10)) % 10 === Number(c[12]);
   }
 
-  // Códigos que existen en las hojas de prueba. Cualquier otro es sospechoso de lectura errónea.
+  // Códigos que existen en las hojas de prueba. Cualquier otro es una lectura errónea.
+  // (Un EAN-13 mal leído suele tener dígito verificador válido, por eso se compara con la lista exacta.)
+  var EAN_DE_PRUEBA = ['7861234567898'];
   function esperado(c) {
-    return /^90(20|25|30|35|40|50)000[1-3]$/.test(c) || /^20\d{6}$/.test(c) || eanValido(c);
+    return /^90(20|25|30|35|40|50)000[1-3]$/.test(c) || /^200000(0[1-9]|[1-9]\d)$/.test(c) || EAN_DE_PRUEBA.indexOf(c) !== -1;
   }
 
   function describir(codigo, formato) {
     var m = /^90(\d{2})(\d{4})$/.exec(codigo);
     if (m) return 'Calibración: barra de 0,' + m[1] + ' mm (copia ' + Number(m[2]) + ')';
     if (/^20\d{6}$/.test(codigo)) return 'Código interno de producto';
-    if (formato === 'ean_13' || formato === 'EAN_13') return 'EAN-13 (de fábrica)';
+    if (/^ean_?13$/i.test(formato)) return 'EAN-13 (de fábrica)';
     return 'Otro (' + formato + ')';
   }
 
@@ -154,6 +157,12 @@
     $('r-media').textContent = (suma / lecturas.length / 1000).toFixed(1) + ' s';
   }
 
+  function sumarCosto(ms) {
+    cuadros++; msAnalisis += ms;
+    var c = costoPorLector[motorActivo] || (costoPorLector[motorActivo] = { cuadros: 0, ms: 0 });
+    c.cuadros++; c.ms += ms;
+  }
+
   function puedeAnalizar() {
     return activo && !esperandoToque && video.readyState >= 2 && video.videoWidth;
   }
@@ -179,15 +188,9 @@
           return { texto: r.rawValue, formato: r.format, cx: (b.x + b.width / 2) / vw, cy: (b.y + b.height / 2) / vh };
         }));
       } catch (e) { /* cuadro no disponible; se reintenta */ }
-      cuadros++; msAnalisis += performance.now() - t0;
+      sumarCosto(performance.now() - t0);
     }
     temporizador = setTimeout(cicloNativo, INTERVALO_DETECCION_MS);
-  }
-
-  function aGris(img) {
-    var d = img.data, n = img.width * img.height, g = new Uint8ClampedArray(n);
-    for (var i = 0, j = 0; i < n; i++, j += 4) g[i] = (d[j] * 77 + d[j + 1] * 150 + d[j + 2] * 29) >> 8;
-    return g;
   }
 
   // ---- Motor ZXing-C++ (WebAssembly): más robusto, lee varios códigos y su posición ----
@@ -225,55 +228,9 @@
           return { texto: r.text, formato: r.format, cx: (x + px) / vw, cy: (y + py) / vh };
         }));
       } catch (e) { /* cuadro no disponible; se reintenta */ }
-      cuadros++; msAnalisis += performance.now() - t0;
+      sumarCosto(performance.now() - t0);
     }
     temporizador = setTimeout(cicloWasm, INTERVALO_DETECCION_MS);
-  }
-
-  // ---- Motor ZXing: solo analiza la zona del recuadro (menos CPU, sin códigos vecinos) ----
-  function iniciarZxing() {
-    var hints = new Map();
-    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
-      ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.EAN_13,
-      ZXing.BarcodeFormat.EAN_8, ZXing.BarcodeFormat.UPC_A
-    ]);
-    hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-    lectorZxing = new ZXing.MultiFormatReader();
-    lectorZxing.setHints(hints);
-    lienzo = document.createElement('canvas');
-    ctx = lienzo.getContext('2d', { willReadFrequently: true });
-    cicloZxing();
-  }
-
-  function cicloZxing() {
-    if (!activo || motorActivo !== 'zxing') return;
-    if (puedeAnalizar()) {
-      var vw = video.videoWidth, vh = video.videoHeight, z = zonaVideo();
-      var x = Math.round(vw * z.x0), y = Math.round(vh * z.y0);
-      var w = Math.round(vw * (z.x1 - z.x0)), h = Math.round(vh * (z.y1 - z.y0));
-      if (lienzo.width !== w || lienzo.height !== h) { lienzo.width = w; lienzo.height = h; }
-      var t0 = performance.now();
-      ctx.drawImage(video, x, y, w, h, 0, 0, w, h);
-      var candidatos = [];
-      // ZXing JS se confunde si un código vecino o una línea de corte aparece en el borde:
-      // se prueban franjas centrales de 50 % y 70 % del recuadro y, si no hay lectura, el recuadro completo.
-      var intentos = [[Math.round(w * 0.25), Math.round(w * 0.5)], [Math.round(w * 0.15), Math.round(w * 0.7)], [0, w]];
-      for (var i = 0; i < intentos.length && !candidatos.length; i++) {
-        try {
-          var img = ctx.getImageData(intentos[i][0], 0, intentos[i][1], h);
-          var lum = new ZXing.RGBLuminanceSource(aGris(img), img.width, img.height);
-          var r = lectorZxing.decodeWithState(new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum)));
-          candidatos.push({ texto: r.getText(), formato: ZXing.BarcodeFormat[r.getBarcodeFormat()], cx: (z.x0 + z.x1) / 2, cy: (z.y0 + z.y1) / 2 });
-        } catch (e) {
-          /* ningún código en este intento */
-        } finally {
-          lectorZxing.reset();
-        }
-      }
-      cuadros++; msAnalisis += performance.now() - t0;
-      procesar(candidatos);
-    }
-    temporizador = setTimeout(cicloZxing, INTERVALO_DETECCION_MS);
   }
 
   // ---- Cámara ----
@@ -319,15 +276,13 @@
         estado('No se pudo cargar el lector ZXing-C++: ' + e.message, true);
         return;
       }
-    } else {
-      iniciarZxing();
     }
 
     var ajustes = pista.getSettings ? pista.getSettings() : {};
     var caps = pista.getCapabilities ? pista.getCapabilities() : {};
     $('linterna').classList.toggle('oculto', !caps.torch);
     $('detener').disabled = false;
-    estado('Lector: ' + ({ nativo: 'nativo del navegador', wasm: 'ZXing-C++', zxing: 'ZXing JS' })[motorActivo] +
+    estado('Lector: ' + ({ nativo: 'nativo del navegador', wasm: 'ZXing-C++' })[motorActivo] +
       ' · cámara ' + (ajustes.width || '?') + '×' + (ajustes.height || '?') +
       (caps.focusMode ? ' · enfoque: ' + caps.focusMode.join('/') : ''));
   }
@@ -335,7 +290,6 @@
   function detener() {
     activo = false;
     clearTimeout(temporizador);
-    lectorZxing = null;
     if (flujo) { flujo.getTracks().forEach(function (t) { t.stop(); }); flujo = null; }
     pista = null;
     linternaOn = false;
@@ -384,7 +338,10 @@
     var texto = 'Prueba de escaneo · ' + new Date().toLocaleString() + '\n' +
       'Navegador: ' + navigator.userAgent + '\n' +
       'Lector: ' + (motorActivo || 'sin iniciar') + ' · modo: ' + $('modo').value + '\n' +
-      'Análisis por cuadro: ' + (cuadros ? (msAnalisis / cuadros).toFixed(0) + ' ms (' + cuadros + ' cuadros)' : '—') + '\n' +
+      'Análisis por cuadro: ' + (Object.keys(costoPorLector).map(function (k) {
+        var c = costoPorLector[k];
+        return k + ' ' + (c.ms / c.cuadros).toFixed(0) + ' ms (' + c.cuadros + ' cuadros)';
+      }).join(' · ') || '—') + '\n' +
       'Lecturas: ' + lecturas.length + ' · sospechosas: ' + $('r-malas').textContent + ' · promedio ' + $('r-media').textContent + '\n\n' +
       lecturas.map(function (l) { return l.hora + '\t' + l.codigo + '\t' + l.desc + '\t' + l.ms + ' ms\t' + l.motor + '\t' + l.modo; }).join('\n');
     var listo = function () { $('copiado').textContent = 'Copiado. Pégalo en el chat.'; };

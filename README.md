@@ -7,8 +7,8 @@ Prototipo sin servidor ni base de datos. Responde una sola pregunta antes de con
 | Archivo | Qué hace |
 |---|---|
 | `etiquetas.html` | Genera hojas A4: una **hoja de calibración** (6 grosores de barra, de 0,20 a 0,50 mm) y **etiquetas de productos** en 3 tamaños, con líneas de corte, precio opcional y posición de inicio para aprovechar hojas usadas |
-| `escanear.html` | Escanea con la cámara del celular con tres lectores a elegir: nativo del navegador, ZXing-C++ (WebAssembly) y ZXing JS. Solo lee dentro del recuadro blanco y, si hay varios códigos, toma el más cercano al centro. Pide dos cuadros seguidos iguales antes de contar una lectura. Modo **continuo** (no repite un código hasta que sale del recuadro) y modo **una a la vez** (espera a que toques "Leer siguiente"). Mide tiempos, marca lecturas sospechosas y copia los resultados |
-| `vendor/` | JsBarcode 3.12.3, @zxing/library 0.21.3 y zxing-wasm 3.1.4 (lector), copiados localmente (sin depender de CDN) |
+| `escanear.html` | Escanea con la cámara del celular con dos lectores: nativo del navegador y ZXing-C++ (WebAssembly) como respaldo. ZXing JS se retiró el 5 oct 2026 tras leer mal dos EAN-13 en la prueba real. Solo lee dentro del recuadro blanco y, si hay varios códigos, toma el más cercano al centro. Pide dos cuadros seguidos iguales antes de contar una lectura. Modo **continuo** (no repite un código hasta que sale del recuadro) y modo **una a la vez** (espera a que toques "Leer siguiente"). Mide tiempos, marca lecturas sospechosas y copia los resultados |
+| `vendor/` | JsBarcode 3.12.3 y zxing-wasm 3.1.4 (lector), copiados localmente (sin depender de CDN) |
 
 Códigos internos: 8 dígitos que empiezan con `20` (rango reservado para uso interno de tiendas). Códigos de 13 dígitos válidos se imprimen como EAN-13.
 
@@ -35,7 +35,7 @@ Códigos internos: 8 dígitos que empiezan con `20` (rango reservado para uso in
 2. Con el lector *Automático*, escanear cada fila de la hoja de calibración (3 copias por fila), sosteniendo el celular a unos 10–15 cm.
 3. Repetir con la hoja en papel fotográfico.
 4. Repetir con luz baja (o activar la linterna si aparece el botón).
-5. Repetir la hoja mate con cada lector: *ZXing-C++* y *ZXing JS*.
+5. Repetir la hoja mate con el lector *ZXing-C++*.
 6. Probar los dos modos: *Continua* (dejar el celular quieto sobre un código: debe contarlo una sola vez) y *Una a la vez*.
 7. Escanear las etiquetas de productos de los 3 tamaños.
 8. **Copiar resultados** después de cada bloque y pegarlos en el chat, indicando papel y luz.
